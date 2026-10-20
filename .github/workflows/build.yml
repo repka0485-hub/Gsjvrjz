@@ -1,0 +1,44 @@
+name: build-esp
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve NDK
+        run: echo "NDK_ROOT=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
+
+      - name: Fetch ImGui
+        run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
+
+      - name: Build Dobby (static, arm64)
+        run: |
+          git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
+          cmake -S dobby_src -B dobby_build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DDOBBY_GENERATE_SHARED=OFF -DDOBBY_DEBUG=OFF
+          cmake --build dobby_build
+          mkdir -p dobby
+          cp dobby_src/include/dobby.h dobby/
+          cp "$(find dobby_build -name 'libdobby.a' | head -n1)" dobby/
+
+      - name: Build libesp_core.so
+        run: |
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
+            -DCMAKE_BUILD_TYPE=Release
+          cmake --build build
+          "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" build/libesp_core.so
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: libesp_core
+          path: build/libesp_core.so
