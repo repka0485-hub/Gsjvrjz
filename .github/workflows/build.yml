@@ -10,20 +10,23 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Resolve NDK
-        run: echo "NDK_ROOT=${ANDROID_NDK_LATEST_HOME:-$ANDROID_NDK_HOME}" >> "$GITHUB_ENV"
+      - uses: nttld/setup-ndk@v1
+        id: ndk
+        with:
+          ndk-version: r26d
 
       - name: Fetch ImGui
         run: git clone --depth 1 --branch v1.90.9 https://github.com/ocornut/imgui.git imgui
 
-      - name: Build Dobby (static, arm64)
+      - name: Build Dobby (pinned by date, HEAD is mid-refactor and does not compile)
         run: |
-          git clone --depth 1 https://github.com/jmpews/Dobby.git dobby_src
+          git clone https://github.com/jmpews/Dobby.git dobby_src
+          git -C dobby_src checkout "$(git -C dobby_src rev-list -1 --before=2023-06-01 HEAD)"
           cmake -S dobby_src -B dobby_build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DDOBBY_GENERATE_SHARED=OFF -DDOBBY_DEBUG=OFF
+            -DCMAKE_BUILD_TYPE=Release -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DDOBBY_GENERATE_SHARED=OFF -DDOBBY_DEBUG=OFF -DPlugin.SymbolResolver=ON
           cmake --build dobby_build
           mkdir -p dobby
           cp dobby_src/include/dobby.h dobby/
@@ -32,11 +35,11 @@ jobs:
       - name: Build libesp_core.so
         run: |
           cmake -S . -B build -G Ninja \
-            -DCMAKE_TOOLCHAIN_FILE="$NDK_ROOT/build/cmake/android.toolchain.cmake" \
+            -DCMAKE_TOOLCHAIN_FILE="${{ steps.ndk.outputs.ndk-path }}/build/cmake/android.toolchain.cmake" \
             -DANDROID_ABI=arm64-v8a -DANDROID_PLATFORM=android-24 \
             -DCMAKE_BUILD_TYPE=Release
           cmake --build build
-          "$NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" build/libesp_core.so
+          "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip" build/libesp_core.so
 
       - uses: actions/upload-artifact@v4
         with:
